@@ -17,7 +17,7 @@ data:
     import os
     import re
 
-    st.set_page_config(page_title="AIoT Intelligence", layout="wide", page_icon="🌐")
+    st.set_page_config(page_title="Edge Intelligence", layout="wide", page_icon="🌐")
 
     # --- CSS ---
     st.markdown("""
@@ -78,7 +78,6 @@ data:
 
     # --- SIDEBAR ---
     with st.sidebar:
-        # Spacer
         st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
         model_input = st.text_input("AI Model:", value="llama3.2:3b")
         
@@ -89,7 +88,7 @@ data:
             st.session_state.fault_start_time = time.time()
             
         st.divider()
-        st.subheader("📊 Live Model Metrics")
+        st.subheader("📊 Live AI Model Metrics")
         metric_ai_temp = st.empty()
         st.caption("") 
         metric_ai_conf = st.empty()
@@ -231,9 +230,11 @@ data:
             else:
                 st.success(f"{action_icon} {res.get('action', 'Wait...')}")
             
-            # --- UPDATED: BIGGER AND BOLDER REASONING HEADER ---
             st.markdown(f"<div style='font-weight:900; font-size:1.3em; margin-top:10px'>📝 REASONING</div>", unsafe_allow_html=True)
-            st.caption(f"_{res.get('reason', '...')}_")
+            
+            # --- UPDATE: BOLD TEXT, NO ITALICS ---
+            # Used HTML div with font-weight:bold instead of st.caption
+            st.markdown(f"<div style='font-weight:bold; font-size:1.1em;'>{res.get('reason', '...')}</div>", unsafe_allow_html=True)
 
         with p_chart.container():
             base = alt.Chart(st.session_state.data).encode(x=alt.X('time', axis=alt.Axis(labels=False)))
