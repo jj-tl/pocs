@@ -1,0 +1,250 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: streamlit-script
+  namespace: aiot
+data:
+  app.py: |
+    import streamlit as st
+    import requests
+    import json
+    import time
+    import random
+    import math
+    import pandas as pd
+    import altair as alt
+    from datetime import datetime
+    import os
+    import re
+
+    st.set_page_config(page_title="AIoT Intelligence", layout="wide", page_icon="🌐")
+
+    # --- CSS ---
+    st.markdown("""
+    <style>
+        .stApp { background-color: #ffffff; color: #31333F; }
+        [data-testid="stSidebar"] { background-color: #f8f9fa; border-right: 1px solid #dee2e6; }
+        header {display: none !important;}
+        footer {display: none !important;}
+        .block-container { padding-top: 1rem !important; padding-bottom: 1rem !important; }
+        div[data-testid="metric-container"] {
+            background-color: #ffffff;
+            border: 1px solid #e9ecef;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+        div[data-testid="metric-container"] > label { color: #6c757d !important; }
+        div[data-testid="metric-container"] > div { color: #212529 !important; }
+        .ai-action-box {
+            font-family: 'Segoe UI', sans-serif;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 6px solid;
+            background-color: #f8f9fa;
+            margin-top: 10px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            border: 1px solid #dee2e6;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+    def clean_json_response(raw_text):
+        match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+        if match: return match.group(0)
+        clean = re.sub(r"```json\s*", "", raw_text)
+        clean = re.sub(r"```", "", clean)
+        return clean.strip()
+
+    OLLAMA_URL = os.getenv("OLLAMA_HOST", "http://ollama-service:11434") + "/api/generate"
+
+    # --- STATE ---
+    if "data" not in st.session_state:
+        st.session_state.data = pd.DataFrame(columns=["time", "vib", "temp", "alert_status"])
+    if "tick" not in st.session_state: st.session_state.tick = 0
+    if "ai_result" not in st.session_state:
+        st.session_state.ai_result = {
+            "diagnosis": "System Online", "status": "NORMAL", 
+            "action": "Monitor parameters", "reason": "Initializing...", "confidence": 100
+        }
+    if "prev_vib" not in st.session_state: st.session_state.prev_vib = 40.0
+    
+    # --- DELAY TRACKING ---
+    if "last_sim_mode" not in st.session_state: st.session_state.last_sim_mode = "Normal"
+    if "fault_start_time" not in st.session_state: st.session_state.fault_start_time = 0
+
+    AI_TEMP = 0.0      
+    CONF_THRESH = 60   
+
+    # --- SIDEBAR ---
+    with st.sidebar:
+        # Spacer
+        st.markdown("<div style='margin-top: 10px;'></div>", unsafe_allow_html=True)
+        model_input = st.text_input("AI Model:", value="llama3.2:3b")
+        
+        sim_mode_selection = st.radio("Simulation:", ["Normal", "Friction (Vib+Temp)", "Looseness (Vib Only)"])
+        
+        if sim_mode_selection != st.session_state.last_sim_mode:
+            st.session_state.last_sim_mode = sim_mode_selection
+            st.session_state.fault_start_time = time.time()
+            
+        st.divider()
+        st.subheader("📊 Live Model Metrics")
+        metric_ai_temp = st.empty()
+        st.caption("") 
+        metric_ai_conf = st.empty()
+        st.divider()
+        if st.button("♻️ Reset System", use_container_width=True):
+            st.session_state.clear()
+            st.rerun()
+
+    if "model_warmed" not in st.session_state:
+        with st.spinner(f"🔌 Connecting to {model_input}..."):
+            try:
+                requests.post(OLLAMA_URL, json={"model": model_input, "prompt": "hi", "stream": False}, timeout=10)
+                st.session_state.model_warmed = True
+            except: pass
+
+    # --- MAIN CONTENT ---
+    st.title("AIoT : Edge AI Intelligence")
+
+    m1, m2, m3 = st.columns(3)
+    p_vib = m1.empty()
+    p_temp = m2.empty()
+    p_diag = m3.empty()
+    
+    col_ai, col_chart = st.columns([1, 2])
+    p_chat = col_ai.empty()
+    p_chart = col_chart.empty()
+
+    while True:
+        tick = st.session_state.tick
+        
+        # --- PHYSICS ENGINE (15s DELAY) ---
+        current_time = time.time()
+        elapsed = current_time - st.session_state.fault_start_time
+        
+        effective_mode = "Normal"
+        if sim_mode_selection != "Normal":
+            if elapsed < 15: 
+                effective_mode = "Normal" 
+            else:
+                effective_mode = sim_mode_selection
+
+        vib_base = 40 + (2 * math.sin(tick * 0.3))
+        temp_base = 60 + (0.5 * math.cos(tick * 0.1))
+        
+        if effective_mode == "Friction (Vib+Temp)":
+            vib_noise = random.uniform(20, 35)
+            temp_noise = random.uniform(25, 45)
+        elif effective_mode == "Looseness (Vib Only)":
+            vib_noise = random.uniform(25, 45)
+            temp_noise = random.uniform(-1, 1)
+        else:
+            vib_noise = random.uniform(-1, 1)
+            temp_noise = random.uniform(-0.5, 0.5)
+
+        vib_val = round(vib_base + vib_noise, 2)
+        temp_val = round(temp_base + temp_noise, 2)
+        timestamp = datetime.now().strftime("%H:%M:%S")
+
+        new_row = pd.DataFrame({"time": [timestamp], "vib": [vib_val], "temp": [temp_val], "alert_status": [0]})
+        st.session_state.data = pd.concat([st.session_state.data, new_row]).tail(50)
+
+        # --- AI LOGIC ---
+        if tick % 3 == 0:
+            
+            v_tag = "HIGH" if vib_val > 50 else "NORMAL"
+            t_tag = "HIGH" if temp_val > 80 else "NORMAL"
+            
+            prompt = f"""
+            <|begin_of_text|><|start_header_id|>system<|end_header_id|>
+            You are a Reliability Engineer.
+            
+            DIAGNOSTIC RULES:
+            1. IF Vibration HIGH + Temp HIGH -> "BEARING FRICTION" (STATUS: CRITICAL).
+            2. IF Vibration HIGH + Temp NORMAL -> "LOOSE MOUNTING" (STATUS: CRITICAL).
+            3. IF Vibration NORMAL -> "SYSTEM OPTIMAL" (STATUS: NORMAL).
+
+            OUTPUT JSON ONLY.
+            <|eot_id|>
+            <|start_header_id|>user<|end_header_id|>
+            DATA: Vib {vib_val} ({v_tag}), Temp {temp_val} ({t_tag}).
+            Return JSON with keys: "status", "diagnosis", "action", "reason", "confidence".
+            <|eot_id|>
+            <|start_header_id|>assistant<|end_header_id|>
+            """
+            
+            try:
+                resp = requests.post(OLLAMA_URL, json={
+                    "model": model_input, "prompt": prompt, "format": "json", "stream": False, "options": {"temperature": AI_TEMP} 
+                }, timeout=30)
+                
+                if resp.status_code == 200:
+                    raw = resp.json()['response']
+                    payload = json.loads(clean_json_response(raw))
+                    
+                    ai_conf = float(payload.get("confidence", 0))
+                    if ai_conf <= 1.0: ai_conf = ai_conf * 100
+                    ai_conf = int(ai_conf)
+                    
+                    if payload.get("status") == "CRITICAL" and ai_conf >= CONF_THRESH:
+                        st.session_state.data.iloc[-1, st.session_state.data.columns.get_loc("alert_status")] = 1
+                    
+                    st.session_state.ai_result = payload
+                    st.session_state.ai_result["confidence"] = ai_conf
+            except: pass
+
+        # --- RENDER UI ---
+        res = st.session_state.ai_result
+        ai_conf = res.get('confidence', 0)
+        diagnosis_text = res.get('diagnosis', 'SYSTEM OPTIMAL').upper()
+        
+        is_fault = "OPTIMAL" not in diagnosis_text and "ONLINE" not in diagnosis_text
+        
+        if is_fault and ai_conf >= CONF_THRESH:
+            action_icon = "⚠️"
+            header_color = "#dc3545" # Red
+        elif is_fault and ai_conf < CONF_THRESH:
+            action_icon = "❓"
+            header_color = "#d39e00" # Yellow
+        else:
+            action_icon = "✅"
+            header_color = "#28a745" # Green
+
+        p_vib.metric("📡 Vibration", f"{vib_val} Hz")
+        p_temp.metric("🌡️ Temperature", f"{temp_val} °C")
+        
+        if sim_mode_selection != "Normal" and elapsed < 15:
+             p_diag.metric("🤖 AI Diagnosis", f"Injecting in {15-int(elapsed)}s...", delta=None)
+        else:
+             p_diag.metric("🤖 AI Diagnosis", diagnosis_text, delta=None)
+        
+        metric_ai_temp.metric("🧠 Model Temp", f"{AI_TEMP}")
+        metric_ai_conf.metric("⚡ Confidence", f"{ai_conf}%")
+
+        with p_chat.container(border=True):
+            st.markdown(f"<div style='color:{header_color}; font-weight:bold'>🛠️ ACTION</div>", unsafe_allow_html=True)
+            
+            if is_fault:
+                st.error(f"**{action_icon} {res.get('action', 'Wait...')}**")
+            else:
+                st.success(f"{action_icon} {res.get('action', 'Wait...')}")
+            
+            # --- UPDATED: BIGGER AND BOLDER REASONING HEADER ---
+            st.markdown(f"<div style='font-weight:900; font-size:1.3em; margin-top:10px'>📝 REASONING</div>", unsafe_allow_html=True)
+            st.caption(f"_{res.get('reason', '...')}_")
+
+        with p_chart.container():
+            base = alt.Chart(st.session_state.data).encode(x=alt.X('time', axis=alt.Axis(labels=False)))
+            line_v = base.mark_line(color='#007bff').encode(
+                y=alt.Y('vib', scale=alt.Scale(domain=[0, 100]), axis=alt.Axis(title='Vib'))
+            )
+            line_t = base.mark_line(color='#dc3545').encode(
+                y=alt.Y('temp', scale=alt.Scale(domain=[0, 120]), axis=alt.Axis(title='Temp'))
+            )
+            st.altair_chart(alt.layer(line_v, line_t).resolve_scale(y='independent').properties(height=400), use_container_width=True)
+
+        st.session_state.prev_vib = vib_val
+        st.session_state.tick += 1
+        time.sleep(0.4)

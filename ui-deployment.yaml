@@ -1,0 +1,47 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: iot-dashboard
+  namespace: aiot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dashboard
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: dashboard
+    spec:
+      tolerations:
+        - key: "ai"
+          operator: "Equal"
+          value: "allowed"
+          effect: "NoSchedule"
+      volumes:
+        - name: script-vol
+          configMap:
+            name: streamlit-script
+            defaultMode: 420
+      containers:
+        - name: streamlit
+          image: python:3.11-slim
+          command:
+            - /bin/sh
+            - '-c'
+          args:
+            - >-
+              pip install streamlit requests pandas && streamlit run /app/app.py
+              --server.port=8501 --server.address=0.0.0.0
+          ports:
+            - containerPort: 8501
+              protocol: TCP
+          env:
+            - name: OLLAMA_HOST
+              value: http://ollama-service:11434
+          resources: {}
+          volumeMounts:
+            - name: script-vol
+              mountPath: /app
+

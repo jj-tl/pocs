@@ -1,0 +1,13 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: ollama-service
+  namespace: aiot
+spec:
+  ports:
+    - protocol: TCP
+      port: 11434
+      targetPort: 11434
+  selector:
+    app: ollama
+  type: ClusterIP

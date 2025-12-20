@@ -1,0 +1,40 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: ollama
+  namespace: aiot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+    spec:
+      tolerations:
+        - key: "ai"
+          operator: "Equal"
+          value: "allowed"
+          effect: "NoSchedule"
+      volumes:
+        - name: ollama-storage
+          emptyDir: {}
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          ports:
+            - containerPort: 11434
+              protocol: TCP
+          resources:
+            limits:
+              cpu: '6'
+              memory: 12Gi
+            requests:
+              cpu: '6'
+              memory: 12Gi
+          volumeMounts:
+            - name: ollama-storage
+              mountPath: /root/.ollama
+
